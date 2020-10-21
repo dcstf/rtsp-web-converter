@@ -1,6 +1,5 @@
 package com.converter.controller.advice;
 
-import org.springframework.boot.context.properties.bind.validation.BindValidationException;
 import org.springframework.http.converter.HttpMessageConversionException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.BindException;
@@ -45,17 +44,17 @@ public class GlobleExceptionHandler {
 		return JsonResult.error().put("message", "参数不正确," + ex.getMessage());
 	}
 
-	/**
-	 * 参数校验出错
-	 * 
-	 * @param ex
-	 * @return
-	 */
-	@ExceptionHandler(value = BindValidationException.class)
-	public JsonResult errorHandler(BindValidationException ex) {
-		log.error(ex.getMessage(), ex);
-		return JsonResult.error().put("message", "参数不正确," + ex.getMessage());
-	}
+//	/**
+//	 * 参数校验出错
+//	 *
+//	 * @param ex
+//	 * @return
+//	 */
+//	@ExceptionHandler(value = BindValidationException.class)
+//	public JsonResult errorHandler(BindValidationException ex) {
+//		log.error(ex.getMessage(), ex);
+//		return JsonResult.error().put("message", "参数不正确," + ex.getMessage());
+//	}
 
 	/**
 	 * 请求的方式不支持

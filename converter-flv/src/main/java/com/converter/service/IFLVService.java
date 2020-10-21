@@ -1,6 +1,5 @@
 package com.converter.service;
 
-import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
 public interface IFLVService {
@@ -11,6 +10,6 @@ public interface IFLVService {
 	 * @param url
 	 * @param response
 	 */
-	public void open(String url, HttpServletResponse response, HttpServletRequest request);
+	public void open(String url, HttpServletResponse response);
 
 }

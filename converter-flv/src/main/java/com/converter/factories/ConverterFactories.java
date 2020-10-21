@@ -1,21 +1,14 @@
 package com.converter.factories;
 
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-
-import javax.servlet.AsyncContext;
-
+import com.converter.factories.state.ConverterState;
+import lombok.extern.slf4j.Slf4j;
 import org.bytedeco.ffmpeg.avcodec.AVPacket;
-import org.bytedeco.ffmpeg.global.avcodec;
 import org.bytedeco.javacv.FFmpegFrameGrabber;
 import org.bytedeco.javacv.FFmpegFrameRecorder;
 
-import com.alibaba.fastjson.util.IOUtils;
-
-import lombok.extern.slf4j.Slf4j;
+import java.io.ByteArrayOutputStream;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * javacv转包装<br/>
@@ -52,143 +45,117 @@ public class ConverterFactories extends Thread implements Converter {
 	/**
 	 * 流输出
 	 */
-	private List<AsyncContext> outEntitys;
-
+	private Map<String, OutputStreamEntity> outEntitys;
+	/**
+	 * 当前转换器状态
+	 */
+	private ConverterState state = ConverterState.INITIAL;
 	/**
 	 * key用于表示这个转换器
 	 */
 	private String key;
-
+	/**
+	 * 上次更新时间<br/>
+	 * 客户端读取是刷新<br/>
+	 * 如果没有客户端读取，会在一分钟后销毁这个转换器
+	 */
+	private long updateTime;
 	/**
 	 * 转换队列
 	 */
 	private Map<String, Converter> factories;
 
-	public ConverterFactories(String url, String key, Map<String, Converter> factories, List<AsyncContext> outEntitys) {
+	public ConverterFactories(String url, String key, Map<String, Converter> factories) {
 		this.url = url;
 		this.key = key;
 		this.factories = factories;
-		this.outEntitys = outEntitys;
+		this.updateTime = System.currentTimeMillis();
 	}
 
 	@Override
 	public void run() {
-		boolean isCloseGrabberAndResponse = true;
 		try {
 			grabber = new FFmpegFrameGrabber(url);
 			if ("rtsp".equals(url.substring(0, 4))) {
 				grabber.setOption("rtsp_transport", "tcp");
-				grabber.setOption("stimeout", "5000000");
+				grabber.setOption("stimeout", "500000");
 			} else {
-				grabber.setOption("timeout", "5000000");
+				grabber.setOption("timeout", "500000");
 			}
 			grabber.start();
-			if (avcodec.AV_CODEC_ID_H264 == grabber.getVideoCodec()
-					&& (grabber.getAudioChannels() == 0 || avcodec.AV_CODEC_ID_AAC == grabber.getAudioCodec())) {
-				log.info("this url:{} converterFactories start", url);
-				// 来源视频H264格式,音频AAC格式
-				// 无须转码，更低的资源消耗，更低的延迟
-				stream = new ByteArrayOutputStream();
-				recorder = new FFmpegFrameRecorder(stream, grabber.getImageWidth(), grabber.getImageWidth(),
-						grabber.getAudioChannels());
-				recorder.setInterleaved(true);
-				recorder.setVideoOption("preset", "ultrafast");
-				recorder.setVideoOption("tune", "zerolatency");
-				recorder.setVideoOption("crf", "25");
-				recorder.setFrameRate(grabber.getFrameRate());
-				recorder.setSampleRate(grabber.getSampleRate());
-				if (grabber.getAudioChannels() > 0) {
-					recorder.setAudioChannels(grabber.getAudioChannels());
-					recorder.setAudioBitrate(grabber.getAudioBitrate());
-					recorder.setAudioCodec(grabber.getAudioCodec());
+			stream = new ByteArrayOutputStream();
+			outEntitys = new ConcurrentHashMap<>();
+			state = ConverterState.OPEN;
+			recorder = new FFmpegFrameRecorder(stream, grabber.getImageWidth(), grabber.getImageWidth(),
+					grabber.getAudioChannels());
+			recorder.setFrameRate(grabber.getFrameRate());
+			recorder.setSampleRate(grabber.getSampleRate());
+			if (grabber.getAudioChannels() > 0) {
+				recorder.setAudioChannels(grabber.getAudioChannels());
+				recorder.setAudioBitrate(grabber.getAudioBitrate());
+				recorder.setAudioCodec(grabber.getAudioCodec());
+			}
+			recorder.setFormat("flv");
+			recorder.setVideoBitrate(grabber.getVideoBitrate());
+			recorder.setVideoCodec(grabber.getVideoCodec());
+			recorder.start(grabber.getFormatContext());
+			state = ConverterState.RUN;
+			if (headers == null) {
+				headers = stream.toByteArray();
+				stream.reset();
+				for (OutputStreamEntity o : outEntitys.values()) {
+					o.getOutput().write(headers);
 				}
-				recorder.setFormat("flv");
-				recorder.setVideoBitrate(grabber.getVideoBitrate());
-				recorder.setVideoCodec(grabber.getVideoCodec());
-				recorder.start(grabber.getFormatContext());
-				if (headers == null) {
-					headers = stream.toByteArray();
+			}
+			int errorNum = 0;
+			while (runing) {
+				AVPacket k = grabber.grabPacket();
+				if (k != null) {
+					try {
+						recorder.recordPacket(k);
+					} catch (Exception e) {
+					}
+					byte[] b = stream.toByteArray();
 					stream.reset();
-					writeResponse(headers);
-				}
-				while (runing) {
-					AVPacket k = grabber.grabPacket();
-					if (k != null) {
-						try {
-							recorder.recordPacket(k);
-						} catch (Exception e) {
-						}
-						if (stream.size() > 0) {
-							byte[] b = stream.toByteArray();
-							stream.reset();
-							writeResponse(b);
-							if (outEntitys.isEmpty()) {
-								log.info("没有输出退出");
-								break;
-							}
+					for (OutputStreamEntity o : outEntitys.values()) {
+						if (o.getOutput().size() < (1024 * 1024)) {
+							o.getOutput().write(b);
 						}
 					}
-					Thread.sleep(5);
+					errorNum = 0;
+				} else {
+					errorNum++;
+					if (errorNum > 500) {
+						break;
+					}
 				}
-			} else {
-				isCloseGrabberAndResponse = false;
-				// 需要转码为视频H264格式,音频AAC格式
-				ConverterTranFactories c = new ConverterTranFactories(url, key, factories, outEntitys, grabber);
-				factories.put(key, c);
-				c.start();
 			}
 		} catch (Exception e) {
 			log.error(e.getMessage(), e);
+			state = ConverterState.ERROR;
 		} finally {
-			closeConverter(isCloseGrabberAndResponse);
-			completeResponse(isCloseGrabberAndResponse);
-			log.info("this url:{} converterFactories exit", url);
-
-		}
-	}
-
-	/**
-	 * 输出FLV视频流
-	 * 
-	 * @param b
-	 */
-	public void writeResponse(byte[] b) {
-		Iterator<AsyncContext> it = outEntitys.iterator();
-		while (it.hasNext()) {
-			AsyncContext o = it.next();
-			try {
-				o.getResponse().getOutputStream().write(b);
-			} catch (Exception e) {
-				log.info("移除一个输出");
-				it.remove();
-			}
+			closeConverter();
+			log.info("exit");
+			state = ConverterState.CLOSE;
+			factories.remove(this.key);
 		}
 	}
 
 	/**
 	 * 退出转换
 	 */
-	public void closeConverter(boolean isCloseGrabberAndResponse) {
-		if (isCloseGrabberAndResponse) {
-			IOUtils.close(grabber);
-			factories.remove(this.key);
-		}
-		IOUtils.close(recorder);
-		IOUtils.close(stream);
-	}
-
-	/**
-	 * 关闭异步响应
-	 * 
-	 * @param isCloseGrabberAndResponse
-	 */
-	public void completeResponse(boolean isCloseGrabberAndResponse) {
-		if (isCloseGrabberAndResponse) {
-			Iterator<AsyncContext> it = outEntitys.iterator();
-			while (it.hasNext()) {
-				AsyncContext o = it.next();
-				o.complete();
+	public void closeConverter() {
+		try {
+			recorder.stop();
+			grabber.stop();
+			grabber.close();
+			recorder.close();
+			stream.close();
+			for (OutputStreamEntity o : outEntitys.values()) {
+				o.getOutput().close();
 			}
+		} catch (Exception e) {
+			log.error(e.getMessage(), e);
 		}
 	}
 
@@ -203,14 +170,41 @@ public class ConverterFactories extends Thread implements Converter {
 	}
 
 	@Override
-	public void addOutputStreamEntity(String key, AsyncContext entity) throws IOException {
-		if (headers == null) {
-			outEntitys.add(entity);
-		} else {
-			entity.getResponse().getOutputStream().write(headers);
-			entity.getResponse().getOutputStream().flush();
-			outEntitys.add(entity);
+	public ConverterState getConverterState() {
+		return this.state;
+	}
+
+	@Override
+	public void addOutputStreamEntity(String key, OutputStreamEntity entity) {
+		try {
+			switch (this.state) {
+			case INITIAL:
+				Thread.sleep(100);
+				addOutputStreamEntity(key, entity);
+				break;
+			case OPEN:
+				outEntitys.put(key, entity);
+				break;
+			case RUN:
+				entity.getOutput().write(this.headers);
+				outEntitys.put(key, entity);
+				break;
+			default:
+				break;
+			}
+		} catch (Exception e) {
+			log.error(e.getMessage(), e);
 		}
+	}
+
+	@Override
+	public void setUpdateTime(long updateTime) {
+		this.updateTime = updateTime;
+	}
+
+	@Override
+	public long getUpdateTime() {
+		return this.updateTime;
 	}
 
 	@Override
@@ -223,4 +217,21 @@ public class ConverterFactories extends Thread implements Converter {
 		}
 	}
 
+	@Override
+	public OutputStreamEntity getOutputStream(String key) {
+		if (outEntitys.containsKey(key)) {
+			return outEntitys.get(key);
+		}
+		return null;
+	}
+
+	@Override
+	public Map<String, OutputStreamEntity> allOutEntity() {
+		return this.outEntitys;
+	}
+
+	@Override
+	public void removeOutputStreamEntity(String key) {
+		this.outEntitys.remove(key);
+	}
 }

@@ -1,21 +1,18 @@
 package com.converter.service.impl;
 
-import java.io.IOException;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.io.ByteArrayOutputStream;
+import java.util.UUID;
 
-import javax.servlet.AsyncContext;
-import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
-import org.apache.tomcat.util.security.MD5Encoder;
+import com.converter.factories.state.ConverterState;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import com.converter.factories.Converter;
-import com.converter.factories.ConverterFactories;
+import com.converter.factories.OutputStreamEntity;
+import com.converter.registration.ConverterRegistration;
 import com.converter.service.IFLVService;
-import com.google.common.collect.Lists;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -28,36 +25,71 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 @Service
 public class FLVService implements IFLVService {
-
-	private Map<String, Converter> converters = new HashMap<>();
+	@Autowired
+	private ConverterRegistration registration;
 
 	@Override
-	public void open(String url, HttpServletResponse response, HttpServletRequest request) {
-		String key = MD5Encoder.encode(url.getBytes());
-		AsyncContext async = request.startAsync();
-		async.setTimeout(0);
-		if (converters.containsKey(key)) {
-			Converter c = converters.get(key);
-			try {
-				c.addOutputStreamEntity(key, async);
-			} catch (IOException e) {
-				log.error(e.getMessage(), e);
-				throw new IllegalArgumentException(e.getMessage());
-			}
-		} else {
-			List<AsyncContext> outs = Lists.newArrayList();
-			outs.add(async);
-			ConverterFactories c = new ConverterFactories(url, key, converters, outs);
-			c.start();
-			converters.put(key, c);
-		}
+	public void open(String url, HttpServletResponse response) {
+		Converter c = registration.open(url);
+		String key = UUID.randomUUID().toString();
+		OutputStreamEntity outEntity = new OutputStreamEntity(new ByteArrayOutputStream(), System.currentTimeMillis(),
+				key);
+		c.addOutputStreamEntity(key, outEntity);
 		response.setContentType("video/x-flv");
 		response.setHeader("Connection", "keep-alive");
 		response.setStatus(HttpServletResponse.SC_OK);
 		try {
 			response.flushBuffer();
-		} catch (IOException e) {
+			readFlvStream(c, outEntity, response);
+		} catch (Exception e) {
 			log.error(e.getMessage(), e);
+			//c.removeOutputStreamEntity(outEntity.getKey());
+		}
+	}
+
+	/**
+	 * 递归读取转换好的视频流
+	 * 
+	 * @param c
+	 * @param outEntity
+	 * @param response
+	 * @throws Exception
+	 */
+	public void readFlvStream(Converter c, OutputStreamEntity outEntity, HttpServletResponse response)
+			throws Exception {
+		switch (c.getConverterState()) {
+		case INITIAL:
+			Thread.sleep(300);
+			readFlvStream(c, outEntity, response);
+			break;
+		case OPEN:
+			Thread.sleep(100);
+			readFlvStream(c, outEntity, response);
+			break;
+		case RUN:
+			while (true) {
+				if (ConverterState.CLOSE ==c.getConverterState()) {
+					log.info("close");
+					break;
+				}
+				if (outEntity.getOutput().size() > 0) {
+
+					byte[] b = outEntity.getOutput().toByteArray();
+					outEntity.getOutput().reset();
+					response.getOutputStream().write(b);
+					outEntity.setUpdateTime(System.currentTimeMillis());
+				}
+				c.setUpdateTime(System.currentTimeMillis());
+				Thread.sleep(100);
+
+			}
+//			break;
+//			readFlvStream(c, outEntity, response);
+		case CLOSE:
+			log.info("close");
+			break;
+		default:
+			break;
 		}
 	}
 

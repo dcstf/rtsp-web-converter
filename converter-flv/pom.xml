@@ -1,12 +1,12 @@
 <?xml version="1.0"?>
 <project xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd" xmlns="http://maven.apache.org/POM/4.0.0"
-    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-  <modelVersion>4.0.0</modelVersion>
-  <groupId>com.converter</groupId>
-  <artifactId>converter-flv</artifactId>
-  <name>converter-flv</name>
-  <url>http://maven.apache.org</url>
-  <repositories>
+		 xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+	<modelVersion>4.0.0</modelVersion>
+	<groupId>com.converter</groupId>
+	<artifactId>converter-flv</artifactId>
+	<name>converter-flv</name>
+	<url>http://maven.apache.org</url>
+	<repositories>
 		<repository>
 			<id>aliyun-repo</id>
 			<name>Aliyun Repository</name>
@@ -26,7 +26,7 @@
 			</snapshots>
 		</repository>
 	</repositories>
-  <properties>
+	<properties>
 		<project.version>0.0.1-SNAPSHOT</project.version>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 		<project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
@@ -39,14 +39,15 @@
 		<spring-boot-admin.version>2.1.1</spring-boot-admin.version>
 		<hibernate.version>5.3.7.Final</hibernate.version>
 		<dropwizard-metrics.version>3.2.6</dropwizard-metrics.version>
+		<spring-cloud.version>Edgware.SR1</spring-cloud.version>
 	</properties>
 	<parent>
 		<groupId>org.springframework.boot</groupId>
 		<artifactId>spring-boot-starter-parent</artifactId>
-		<version>2.0.5.RELEASE</version>
+		<version>1.5.13.RELEASE</version>
 		<relativePath />
 	</parent>
-  <dependencies>
+	<dependencies>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter</artifactId>
@@ -56,6 +57,10 @@
 					<artifactId>spring-boot-starter-logging</artifactId>
 				</exclusion>
 			</exclusions>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.cloud</groupId>
+			<artifactId>spring-cloud-starter-eureka</artifactId>
 		</dependency>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
@@ -105,6 +110,7 @@
 		<dependency>
 			<groupId>org.apache.commons</groupId>
 			<artifactId>commons-lang3</artifactId>
+			<version>3.3.2</version>
 		</dependency>
 		<dependency>
 			<groupId>commons-httpclient</groupId>
@@ -122,6 +128,17 @@
 			<version>1.5.1</version>
 		</dependency>
 	</dependencies>
+	<dependencyManagement>
+		<dependencies>
+			<dependency>
+				<groupId>org.springframework.cloud</groupId>
+				<artifactId>spring-cloud-dependencies</artifactId>
+				<version>${spring-cloud.version}</version>
+				<type>pom</type>
+				<scope>import</scope>
+			</dependency>
+		</dependencies>
+	</dependencyManagement>
 	<build>
 		<plugins>
 			<plugin>

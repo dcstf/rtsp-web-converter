@@ -19,7 +19,7 @@ public class SchedulerConfig {
 	public TaskScheduler taskScheduler() {
 		ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
 		// 线程池大小
-		scheduler.setPoolSize(3);
+		scheduler.setPoolSize(6);
 		// 线程名字前缀
 		scheduler.setThreadNamePrefix("task-thread-");
 		return scheduler;
